@@ -1,0 +1,2 @@
+C:/msys64/mingw64/bin/ar.exe qc liblibParser.a CMakeFiles/libParser.dir/ReadNumber.cpp.obj CMakeFiles/libParser.dir/VLQ.cpp.obj CMakeFiles/libParser.dir/Event.cpp.obj CMakeFiles/libParser.dir/MidiEvent.cpp.obj CMakeFiles/libParser.dir/SysExEvent.cpp.obj CMakeFiles/libParser.dir/MetaEvent.cpp.obj CMakeFiles/libParser.dir/MTrkEvent.cpp.obj CMakeFiles/libParser.dir/BaseChunk.cpp.obj CMakeFiles/libParser.dir/HeaderChunk.cpp.obj CMakeFiles/libParser.dir/TrackChunk.cpp.obj CMakeFiles/libParser.dir/Midi.cpp.obj
+C:/msys64/mingw64/bin/ranlib.exe liblibParser.a
