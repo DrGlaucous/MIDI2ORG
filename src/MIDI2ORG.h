@@ -53,3 +53,13 @@ typedef struct ORGNOTEDATA
 	bool EventType{};//true == start, false == stop
 
 }ORGNOTEDATA;
+
+typedef struct MIDICONV
+{
+	const char* Path;
+	//bool DrumTrack;//process one of the tracks differently (we may not use this in favor of having the user do it manaully after (or with a tool))
+	//int DrumTrackNum;
+	bool ForceSimplify;//MIDI addresses are much bigger than ORG addresses. The program will automatically try to find the gcd, but if the files are still big, this forces loss of definition in favor of a more managable file
+	int SimplestNote;//put the denominator of the smallest accurately positioned note here (I.E 1/4 note == 4, 1/2 note == 2)
+
+}MIDICONV;

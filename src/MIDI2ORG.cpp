@@ -30,7 +30,7 @@ namespace fs = std::filesystem;
 TRACKINFO tracks[MAXTRACK];
 ORGFILES orgs[2];
 //static unsigned int AbsTime{};//absolute time since the start of the file
-static unsigned short gTempo{};
+static unsigned short gResolution{};
 
 //used to determine the new beat structure of the song
 int gcd(int a, int b) {
@@ -64,6 +64,47 @@ int gcdArray(std::vector<int> processArray)
 	}
 	return result;
 }
+bool isPower(int entry, int powerOf)
+{
+	int iterateI = 0;
+
+	if (powerOf == 0)
+	{
+		if (entry == 0)
+			return true;
+		else
+			return false;
+	}
+
+	while (1)
+	{
+		if (pow(powerOf, iterateI) < entry)
+		{
+			iterateI += 1;
+		}
+		else if (pow(powerOf, iterateI) > entry)
+		{
+			return false;
+		}
+		else
+		{
+			return true;
+		}
+
+
+
+
+	}
+
+}
+int ValueMap(float val1Min, float val1Max, float val2Min, float val2Max, float input)
+{
+	
+	float MapBuffer = val2Min + ((val2Max - val2Min) / (val1Max - val1Min)) * (input - val1Min);
+	return floor(MapBuffer + 0.5);//round to nearest integer
+
+}
+
 
 //change the timing of a song
 void StretchSong(unsigned char *memfile, char bpmStretch, char dotStretch)
@@ -188,11 +229,11 @@ int VerifyFile(const char* path)
 	return 0;//success
 }
 
-bool ConvertMidi(const char* path)
+bool ConvertMidi(MIDICONV inOptions)
 {
 
 	NOTEDATA PrepNote;
-	std::string DirectoryPath = path + std::string(".fold");
+	std::string DirectoryPath = inOptions.Path + std::string(".fold");
 
 	if (!(fs::is_directory(DirectoryPath.c_str())))//checks to see if the directory exists, skips making it if this is true
 	{
@@ -207,9 +248,9 @@ bool ConvertMidi(const char* path)
 
 	//smf::MidiFile MIDIFILE;
 
-	//MIDIFILE.read(path);
+	//MIDIFILE.read(inOptions.Path);
 
-	Midi MIDIFile{ path };
+	Midi MIDIFile{ inOptions.Path };
 
 	auto& header = MIDIFile.getHeader();
 	auto& tracks = MIDIFile.getTracks();
@@ -219,8 +260,25 @@ bool ConvertMidi(const char* path)
 
 
 
-	//I think tempos can be directly ported from MIDI to ORG (same type of thing)
-	gTempo = header.getDivision();
+	//Tempo conversion formulae used by ORGmaker2:
+	//ltempo = 60 * 1000 / (info.wait * info.dot * iDeltaTime);
+	//ORGTempo = 60 * 1000 / "Wait" perameter * notes in each beat * ???)
+	// 
+	// 
+	//invtempo = 60 * 1000000 / (60 * 1000 / (info.wait * info.dot ));
+	//MIDI tempo = 60 * microseconds / ORGTempo
+	//ORGtempo == jsut normal tempo (BPM)
+	//BPM = 60000 / "X" * Notes in each beat
+	//
+
+
+	unsigned char BeatsPM = 4;//Beats per measure (4 by default if no MIDI time signaute events are encountered), will be shared between tracks
+	unsigned int Tempo = 120;//default MIDI tempo is 120 BMP, or 500000 microseconds per 1/4 note, will be shared between tracks
+	bool TempoSet = false;//if we encounter multiple tempo metadata in a piece of music, this will make sure only the first tempo event sets the tempo for the whole conversion
+
+	gResolution = header.getDivision();
+
+	std::cout << "Resolution: " << gResolution << std::endl;
 
 	int currTrack = 0;//use this to know what track we are looking at
 	for (const auto& track : tracks)//iterates through all tracks
@@ -228,7 +286,6 @@ bool ConvertMidi(const char* path)
 
 		unsigned int AbsTime = 0;//absolute time since the start of the track
 		std::vector<NOTEDATA> TrackData[MAXCHANNEL];//one vector for each channel (will be reused per each track)
-
 
 		auto& events = track.getEvents();
 
@@ -289,67 +346,156 @@ bool ConvertMidi(const char* path)
 					std::cout << "\t\t\tLength: " << PrepNote.TimeRelative << std::endl;
 					std::cout << "\t\t\tABSLength: " << AbsTime << std::endl;
 				}
+				else
+				{
+					int TimeRelative = trackEvent.getDeltaTime().getData();
+					AbsTime += TimeRelative;
+					std::cout << "\t\t\t(MIDI) Length: " << TimeRelative
+						<< "\n\t\t\tABSLength: " << AbsTime
+						<< std::endl;
+				}
+
+
+			}
+			else if (event->getType() == MidiType::EventType::MetaEvent)
+			{
+
+				auto* metaEvent = (MetaEvent*)event;
+				auto status = metaEvent->getStatus();
+
+				uint8_t* data = ((MetaEvent*)event)->getData();
+
+				if (status == MidiType::MetaMessageStatus::TimeSignature)//cache the BPM (in a later revision, we may need to see WHEN this happens, so we can process midis with multiple time signatures)
+				{
+					//I may also want to put a boolean check in here so that this is not reset more than 1x, so the first time signature is the one that is always kept
+					BeatsPM = data[0];//if it is a time signature event, we already know that the first chunk of data will be the numerator, or BPM
+					std::cout << "\t\tTime signature event: Numerator = " << (int)BeatsPM << std::endl;
+				}
+				else if (status == MidiType::MetaMessageStatus::SetTempo)
+				{
+					Tempo = 60000000 / ((0 << 24 | data[0] << 16) | (data[1] << 8) | data[2]);//tempo events only have 3 bits of data (in BIG_ENDIAN format), so the first bit needs to be filled with 0
+					std::cout << "\t\tTempo event: New Tempo = " << Tempo << std::endl;
+				}
+
+
+
+				//write out the event to the terminal
+				std::cout << "\t\tMeta event:" << std::endl
+					<< "\t\t\tStatus: 0x" << std::hex
+					<< ((MetaEvent*)event)->getStatus() << std::endl
+					<< "\t\t\tData: 0x";
+				for (int i{ 0 }; i < ((MetaEvent*)event)->getLength(); ++i) {
+					std::cout << (int)data[i] << '-';
+				}
+				if (!((MetaEvent*)event)->getLength()) {
+					std::cout << "0";
+				}
+				std::cout << std::dec << std::endl;
+
 
 
 
 			}
 			else
 			{
-				std::cout << "\t\t\tLength: " << trackEvent.getDeltaTime().getData() << std::endl;
+				int TimeRelative = trackEvent.getDeltaTime().getData();
+				AbsTime += TimeRelative;
+				std::cout << "\t\t\t(OTHER) Length: " << TimeRelative
+					<< "\n\t\t\tABSLength: " << AbsTime					
+					<< std::endl;
 			}
 
 
 		}
 
 
-		//NOTE: use Musescore to fix up the midi if you recored it: It will automatically snap notes to standard lengths so 
-		//the size of the addresses can be reduced even more (does it, though? I need to test it myself).
-		//
-		std::vector<int> ArrayOfLength;//will be used to find the gcd of all the MIDI events (so we can hopefully shrink those values some)
-		//see if the file can be reduced
-		for (int i = 0; i < MAXCHANNEL; ++i)//for each vector in the array
+		int reductionRate = 1;
+		//user inputs a note to make worth 1 tick
+		if (inOptions.ForceSimplify)
 		{
 
-			//catch any 0 length arrays sent our way
-			if (TrackData[i].size() == 0)
-			{
-				continue;
-			}
+			if (inOptions.SimplestNote > gResolution)
+				std::cout << "WARNING: Most Prescise Note is less than entered value: No reduction will happen." << std::endl;
 
-			//int ZeroValue = (TrackData[i].begin()->TimeStart) - (TrackData[i].begin()->TimeRelative);//in case we had to use the absolute time, this allows the start value to be anything (but we can just use relative time)
-			for (int j = 0; j < TrackData[i].size(); ++j)//for each event recorded in the track
-			{
+			//int reducFactor  = inOptions.SimplestNote / 4;
 
-				if(((TrackData[i].begin() + j)->TimeRelative) == 0)
-				{
-					continue;//disregard any 0 addresses
-				}
+			reductionRate = gResolution / (inOptions.SimplestNote / 4);
 
-				ArrayOfLength.push_back(((TrackData[i].begin() + j)->TimeRelative));//add the event times to the vector
-			}
-
-
+			//gResolution;//length of 1/4 note
+			//gResolution/2 == length of 1/8 note
 
 		}
+		else
+		{
+			//Auto-shrink
+			//
+			std::vector<int> ArrayOfLength;//will be used to find the gcd of all the MIDI events (so we can hopefully shrink those values some)
+			//see if the file can be reduced
+			for (int i = 0; i < MAXCHANNEL; ++i)//for each vector in the array
+			{
 
-		int reductionRate = gcdArray(ArrayOfLength);
-		std::cout << "Shrinkable by: " << reductionRate << std::endl;//what space can we save?
+				//catch any 0 length arrays sent our way
+				if (TrackData[i].size() == 0)
+				{
+					continue;
+				}
+
+				//int ZeroValue = (TrackData[i].begin()->TimeStart) - (TrackData[i].begin()->TimeRelative);//in case we had to use the absolute time, this allows the start value to be anything (but we can just use relative time)
+				for (int j = 0; j < TrackData[i].size(); ++j)//for each event recorded in the track
+				{
+
+					if (((TrackData[i].begin() + j)->TimeRelative) == 0)
+					{
+						continue;//disregard any 0 addresses
+					}
+
+					ArrayOfLength.push_back(((TrackData[i].begin() + j)->TimeRelative));//add the event times to the vector
+				}
+
+
+
+			}
+
+			reductionRate = gcdArray(ArrayOfLength);
+			if (reductionRate > gResolution)//since our resolution is based on 1/4 notes, any shrinkage past this (like whole notes) will be stopped (it causes a devide by 0 error further down the code)
+				reductionRate = gResolution;
+			std::cout << "Auto-Shrinkable by: " << reductionRate << std::endl;//what space can we save?
+		}
+
+
 
 
 		//force compression: get an input as to how much we want the song crunched down
 		//This is good for cases where a few little notes will balloon up the entire track, or if the midi was created
 		//with imperfect locations. 
 		//deviding an integer will produce an integer + remainder,
-		//we will reound the notes forward or backward depending on how much is left in said remainder (big values will round up, small ones down)
+		//we will round the notes forward or backward depending on how much is left in said remainder (big values will round up, small ones down)
 
 		//compression here
 		for (int i = 0; i < MAXCHANNEL; ++i)//for each vector in the array
 		{
 			for (int j = 0; j < TrackData[i].size(); ++j)//for each event recorded in the track
 			{
-				//compress addresses
-				(TrackData[i].begin() + j)->TimeRelative = ((TrackData[i].begin() + j)->TimeRelative) / reductionRate;
-				(TrackData[i].begin() + j)->TimeStart = ((TrackData[i].begin() + j)->TimeStart) / reductionRate;
+
+				//round up logic
+				int remainderBoost{};
+				if (((TrackData[i].begin() + j)->TimeRelative) % reductionRate > (reductionRate / 2))
+				{
+					remainderBoost = 1;
+				}
+				(TrackData[i].begin() + j)->TimeRelative = (((TrackData[i].begin() + j)->TimeRelative) / reductionRate) + remainderBoost;//compress addresses
+
+
+				//re-applying this logic here may be redundant
+				remainderBoost = 0;
+				if (((TrackData[i].begin() + j)->TimeStart) % reductionRate > (reductionRate / 2))
+				{
+					remainderBoost = 1;
+				}
+				(TrackData[i].begin() + j)->TimeStart = ((TrackData[i].begin() + j)->TimeStart) / reductionRate + remainderBoost;
+
+
+
 			}
 		}
 
@@ -388,14 +534,14 @@ bool ConvertMidi(const char* path)
 			std::vector<ORGNOTEDATA> TrackDataOrg[MAXTRACK];//One vector per each ORG track (used to bump notes to the next track if the current note is still active)
 			ORGNOTEDATA BufferNote;
 
-
+			//converts start/stop values into note X + length (and sorts multiple simultaneous notes into different tracks)
 			for (int z = 0; z < TrackData[i].size(); ++z)//for every MIDI note event
 			{
 			
 
 				BufferNote.Pitch = (TrackData[i].begin() + z)->Pitch - 12;//middle C in MIDI is 60, in ORG it is 48, a difference of 12
 				BufferNote.TimeStart = (TrackData[i].begin() + z)->TimeStart;//no conversions needed here
-				BufferNote.Volume = 30;//lets make this 30 for now (we will use initial velocity from the MIDI later)
+				BufferNote.Volume = (char)ValueMap(0, 127, 4, 252, (TrackData[i].begin() + z)->Volume);//map volume from MIDI format to ORG format
 				BufferNote.Length = 1;//in case the MIDI never tells this note to stop, it will still have a termination point
 				BufferNote.LengthSet = false;//tells us if we need to move on to the next track or not (true == good to add another note behind it)
 				BufferNote.EventType = (TrackData[i].begin() + z)->Status;//start/stop
@@ -417,7 +563,10 @@ bool ConvertMidi(const char* path)
 
 					//we need to put this one above the condition seen above (because if we are playing 2 of the same notes, we want them to be separate)
 					//we also need to check if the input is a start function before doing this \/
-					if ((TrackDataOrg[j].end() - 1)->LengthSet == true && BufferNote.EventType == true)//check to see if the previous note has stopped playing
+					if ((TrackDataOrg[j].end() - 1)->LengthSet == true &&
+						BufferNote.EventType == true &&
+						((TrackDataOrg[j].end() - 1)->Length + (TrackDataOrg[j].end() - 1)->TimeStart) <= BufferNote.TimeStart//a condition that can occur when notes are snapped from length 0 to length 1 (see the function below)
+						)//check to see if the previous note has stopped playing
 					{
 						TrackDataOrg[j].push_back(BufferNote);//we are allowed to push the next note back
 						break;//data applied successfully
@@ -460,6 +609,13 @@ bool ConvertMidi(const char* path)
 						}
 
 
+						//this can happen if the force-simplify function rounds both the start and stop markers of a note to the same address
+						if ((TrackDataOrg[j].end() - 1)->Length == 0)
+						{
+							(TrackDataOrg[j].end() - 1)->Length = 1;//mimimum value
+						}
+
+
 						break;//data applied successfully
 
 					}
@@ -468,7 +624,8 @@ bool ConvertMidi(const char* path)
 	
 				//if we get here and were not able to find a space, the note is (unfortunately) discarded
 	
-				//check: is previous note the same?
+			//I have a habit of taking notes right inside the code. Here is a list of questions asked by the logic above:
+			// check: is previous note the same?
 			// if no, check if the previous note's deltaTime is set
 			// if no, bump to the next track and repeat
 			// 
@@ -478,6 +635,7 @@ bool ConvertMidi(const char* path)
 			//process: send note data
 	
 			}
+
 
 			//time to make the org file
 
@@ -496,23 +654,23 @@ bool ConvertMidi(const char* path)
 
 			//setup header data
 
-			char BeatsPM = 4;//later, we may try to get this data from the MIDI
-			char NotesPB = 4;
+			//BeatsPM can be found at the top of the file (it is set by a MIDI time signature event)
+			char NotesPB = gResolution / reductionRate;
 
 			fwrite("Org-02", 6, 1, outFile);
-			//fwrite(&gTempo, 2, 1, outFile);
-			File_WriteLE16(gTempo, outFile);//this allows us to run this code no matter what endian the host computer is
+			//fwrite(&gResolution, 2, 1, outFile);
+			File_WriteLE16((60000 / (Tempo * NotesPB)), outFile);//tempo
 			File_WriteLE8(BeatsPM, outFile);
 			File_WriteLE8(NotesPB, outFile);
 			File_WriteLE32(0, outFile);//start of repeat loop
-			File_WriteLE32(1000, outFile);//end of repeat loop
+			File_WriteLE32((TrackData[i].end() - 1)->TimeStart, outFile);//end of repeat loop uses the last MIDI event to tell the ORG file where the repeat sign is
 			for (int j = 0; j < MAXTRACK; ++j)//write note info
 			{
 				
 				File_WriteLE16(1000, outFile);//insturment frequency, default is 1000
 				File_WriteLE8(0, outFile);//insturment, will make them all 0
 				File_WriteLE8(0, outFile);//Pipi, 0 by default
-				File_WriteLE16(TrackDataOrg[j].size(), outFile);//number of notes in this track
+				File_WriteLE16((short)TrackDataOrg[j].size(), outFile);//number of notes in this track
 
 			}
 
@@ -560,6 +718,9 @@ int main(void)
 	std::string InputText;
 	std::string Path1;
 
+
+	MIDICONV options;
+	memset(&options, 0, sizeof(options));//reset our options
 	char confirm = 0;
 
 
@@ -579,9 +740,7 @@ int main(void)
 		//program will create a folder containing ORGs in whatever directory the MIDI is in (or should it do it in the current directory)
 
 
-
 		//get the directory for the MIDI
-		
 		bool ValidFirstOrg = false;
 		while (ValidFirstOrg == false)
 		{
@@ -602,6 +761,7 @@ int main(void)
 			case 1:
 				std::cout << "What you entered may not be a MIDI!\nDo you still wish to proceed? (y/n)" << std::endl;
 				std::cin >> confirm;
+				std::cin.ignore();
 				if (tolower(confirm) == 'y')//the user wishes to continue
 				{
 					confirm = 0;//reset confirm
@@ -611,10 +771,54 @@ int main(void)
 				break;
 			}
 
+		}
+		
+
+		std::cout << "Do you want to force-simplify your file? (y/n)\n" 
+			<< "This is useful if an earlier conversion attempt made ORGs of an extremely stretched out size.\n"
+			<< "If you haven't converted your MIDI yet, try \"n\" first, and retry if the output is too big."
+			<< std::endl;
+		std::cin >> confirm;
+		std::cin.ignore();
+		if (tolower(confirm) == 'y')//the user wishes to continue
+		{
+			confirm = 0;//reset confirm
+			options.ForceSimplify = true;
+			int reduceSize{};
+
+			while (1)//keep the user in here until they enter a valid number
+			{
+
+				std::cout << "Enter the size of your most prescise note\n(I.E: 1/8th note will be entered as 8, 1/4 note will be entered as 4)\n"
+					<< "Make your entry a power of 2. (E.G 2, 4, 8, 16, etc..)"
+					<< std::endl;
+				getline(std::cin, InputText);
+
+				reduceSize = strtol(InputText.c_str(), NULL, 10);
+
+				std::cout << "debug" << std::endl;
+
+
+				if (isPower(reduceSize, 2))//see if is a power of 2
+				{
+					std::cout << reduceSize << " is a valid entry." << std::endl;
+					break;
+				}
+				else
+				{
+					std::cout << "Your entry, " << reduceSize << ", was not a power of 2."
+						<< "\nPlease make it a power of 2." << std::endl;
+				}
+
+			}
+
+			options.SimplestNote = reduceSize;//append setting
+
 
 
 		}
-		
+
+
 
 		//TEST to see if gcdArray works (it does)
 		/*
@@ -637,14 +841,31 @@ int main(void)
 
 		std::cout << "\nReady? (y/n)\n";
 		std::cin >> confirm;
+		std::cin.ignore();
 		if (tolower(confirm) == 'y')//the user wishes to continue
 		{
-
+			options.Path = Path1.c_str();//Path1 variable can be eliminated, but I'll do that later
 
 			confirm = 0;//reset confirm
-			ConvertMidi(Path1.c_str());
+			ConvertMidi(options);
 
 		}
+
+		std::cout << "\nDo you want to convert another MIDI? (y/n)\n";
+		std::cin >> confirm;
+		std::cin.ignore();
+		if (tolower(confirm) == 'y')//the user wishes to continue
+		{
+			confirm = 0;//reset confirm
+			memset(&options, 0, sizeof(options));//reset our options
+
+		}
+		else
+		{
+			canExit == true;
+		}
+
+
 
 
 
