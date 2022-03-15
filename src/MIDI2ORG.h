@@ -61,5 +61,8 @@ typedef struct MIDICONV
 	//int DrumTrackNum;
 	bool ForceSimplify;//MIDI addresses are much bigger than ORG addresses. The program will automatically try to find the gcd, but if the files are still big, this forces loss of definition in favor of a more managable file
 	int SimplestNote;//put the denominator of the smallest accurately positioned note here (I.E 1/4 note == 4, 1/2 note == 2)
+	
+	bool HasDrumChannel;
+	int DrumChannel;//this channel will be processed differently from the others
 
 }MIDICONV;

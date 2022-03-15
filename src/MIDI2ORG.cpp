@@ -7,6 +7,7 @@
 #include <sstream>
 #include <vector>
 #include <iterator>
+#include <algorithm>
 #if __cplusplus < 201703L // If the version of C++ is less than 17
 #define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING//silence. 
 #include <experimental/filesystem>
@@ -101,10 +102,15 @@ int ValueMap(float val1Min, float val1Max, float val2Min, float val2Max, float i
 {
 	
 	float MapBuffer = val2Min + ((val2Max - val2Min) / (val1Max - val1Min)) * (input - val1Min);
-	return floor(MapBuffer + 0.5);//round to nearest integer
+	return (int)floor(MapBuffer + 0.5);//round to nearest integer
 
 }
+//sorts by ascending note X value
+bool SortFunction(ORGNOTEDATA one, ORGNOTEDATA two)
+{
+	return (one.TimeStart < two.TimeStart);//in correct position if the earlier positioned one is less than the later positioned one
 
+}
 
 //change the timing of a song
 void StretchSong(unsigned char *memfile, char bpmStretch, char dotStretch)
@@ -267,7 +273,7 @@ bool ConvertMidi(MIDICONV inOptions)
 	// 
 	//invtempo = 60 * 1000000 / (60 * 1000 / (info.wait * info.dot ));
 	//MIDI tempo = 60 * microseconds / ORGTempo
-	//ORGtempo == jsut normal tempo (BPM)
+	//ORGtempo == just normal tempo (BPM)
 	//BPM = 60000 / "X" * Notes in each beat
 	//
 
@@ -373,8 +379,17 @@ bool ConvertMidi(MIDICONV inOptions)
 				}
 				else if (status == MidiType::MetaMessageStatus::SetTempo)
 				{
-					Tempo = 60000000 / ((0 << 24 | data[0] << 16) | (data[1] << 8) | data[2]);//tempo events only have 3 bits of data (in BIG_ENDIAN format), so the first bit needs to be filled with 0
-					std::cout << "\t\tTempo event: New Tempo = " << Tempo << std::endl;
+					if (!TempoSet)
+					{
+						Tempo = 60000000 / ((0 << 24 | data[0] << 16) | (data[1] << 8) | data[2]);//tempo events only have 3 bits of data (in BIG_ENDIAN format), so the first bit needs to be filled with 0
+						std::cout << "\t\tTempo event: New Tempo = " << Tempo << std::endl;
+						TempoSet = true;
+					}
+					else
+					{
+						std::cout << "\t\tTempo event: Cannot change the tempo. Already set to " << Tempo << std::endl;
+					}
+
 				}
 
 
@@ -502,14 +517,8 @@ bool ConvertMidi(MIDICONV inOptions)
 
 
 
-
-
-
-
-
-
 		//this is where we need to put the data from our vector into a file
-		std::string TrackSubfolder = DirectoryPath + '/' + std::to_string(currTrack) + ".fold";
+		std::string TrackSubfolder = DirectoryPath + std::string("/Track") + std::to_string(currTrack) + ".fold";
 
 
 		if (!(fs::is_directory(TrackSubfolder.c_str())))//checks to see if the directory exists, skips making it if this is true
@@ -533,6 +542,10 @@ bool ConvertMidi(MIDICONV inOptions)
 
 			std::vector<ORGNOTEDATA> TrackDataOrg[MAXTRACK];//One vector per each ORG track (used to bump notes to the next track if the current note is still active)
 			ORGNOTEDATA BufferNote;
+
+
+
+
 
 			//converts start/stop values into note X + length (and sorts multiple simultaneous notes into different tracks)
 			for (int z = 0; z < TrackData[i].size(); ++z)//for every MIDI note event
@@ -635,6 +648,78 @@ bool ConvertMidi(MIDICONV inOptions)
 			//process: send note data
 	
 			}
+
+
+			//handle drum track parsing
+			if (inOptions.HasDrumChannel == true &&
+				i == inOptions.DrumChannel)
+			{
+				//the goal of this function is to separate all notes by pitch
+
+				std::vector<ORGNOTEDATA> TrackDrumOrg[MAXTRACK];//we will be copying the processed data 
+
+				bool PushedBack = false;//use this to ratchet DrumTrackNumber x1 if things were pushed back on that note[u]
+				int DrumTrackNumber = 8;//increment this each time we find a populated note
+				//iterate through all values in a char (max possible values in an ORG's pitch scale)
+				for (int u = 0; u < 256; ++u)
+				{
+					//iterate thorugh all tracks
+					for (int z = 0; z < MAXTRACK; ++z)
+					{
+						//skip channels with 0 notes
+						if (TrackDataOrg[z].size() == 0)
+							continue;
+
+						//go through all the notes and push back any that match the pitch
+						for (int w = 0; w < TrackDataOrg[z].size(); ++w)
+						{
+							if ((TrackDataOrg[z].begin() + w)->Pitch == u)
+							{
+								PushedBack = true;
+								TrackDrumOrg[DrumTrackNumber].push_back(*(TrackDataOrg[z].begin() + w));
+							}
+						}
+
+
+					}
+
+					if (PushedBack)
+					{
+						PushedBack = false;
+						if (++DrumTrackNumber >= MAXTRACK)
+						{
+							break;//end process if we've run out of avalible slots
+						}
+					}
+
+				}
+
+				//At this point, TrackDrumOrg is organized by pitch: all notes with the same pitch are in the same slot
+				//we need to sort them by start time (we don't need to worry about total length because they are all the same note)
+				for (int u = 8; u < MAXTRACK; ++u)
+				{
+					if (TrackDrumOrg[u].size() == 0)
+						continue;
+
+					std::sort(TrackDrumOrg[u].begin(), TrackDrumOrg[u].end(), SortFunction);//sort by X value
+
+				}
+
+				
+				//copy our new drum track to the Org vector to be written out
+				for (int u = 0; u < MAXTRACK; ++u)
+				{
+					TrackDataOrg[u].clear();
+					TrackDataOrg[u] = TrackDrumOrg[u];
+
+				}
+
+
+
+
+			}
+
+
 
 
 			//time to make the org file
@@ -796,7 +881,6 @@ int main(void)
 
 				reduceSize = strtol(InputText.c_str(), NULL, 10);
 
-				std::cout << "debug" << std::endl;
 
 
 				if (isPower(reduceSize, 2))//see if is a power of 2
@@ -817,6 +901,53 @@ int main(void)
 
 
 		}
+
+
+		std::cout << "Does this MIDI have a drum channel? (y/n)" << std::endl;
+		std::cin >> confirm;
+		std::cin.ignore();
+		if (tolower(confirm) == 'y')//the user wishes to continue
+		{
+			confirm = 0;//reset confirm
+			options.HasDrumChannel = true;
+
+			while (1)//keep the user in here until they enter a valid number
+			{
+
+				std::cout << "Enter the channel number your drums are on.\n(the MIDI standard is the 10th channel [channel #9])"
+					<< std::endl;
+				getline(std::cin, InputText);
+
+				char* FailPosition;//catch non-int entries
+				options.DrumChannel = strtol(InputText.c_str(), &FailPosition, 10);
+
+
+				if (options.DrumChannel >= 0 &&
+					options.DrumChannel < 16
+					)//see if the entered number is within the valid channel range
+				{
+					if (InputText.c_str()[0] == *FailPosition)//checks to see if the pointer returned by strtol is the same as the first index (because strtol returns a 0 on fail))
+					{
+						std::cout << "You did not type a number.\nPlease enter a number between 0 and 15." << std::endl;
+					}
+					else
+					{
+						std::cout << options.DrumChannel << " is a valid entry." << std::endl;
+						break;
+					}
+				}
+				else
+				{
+
+					std::cout << "Your entry, " << options.DrumChannel << ", is not a valid channel."
+						<< "\nPlease enter a number between 0 and 15." << std::endl;
+				}
+
+			}
+
+
+		}
+
 
 
 
@@ -862,7 +993,7 @@ int main(void)
 		}
 		else
 		{
-			canExit == true;
+			canExit = true;
 		}
 
 
