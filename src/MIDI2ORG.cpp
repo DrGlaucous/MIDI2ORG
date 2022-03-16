@@ -874,7 +874,7 @@ int main(void)
 			while (1)//keep the user in here until they enter a valid number
 			{
 
-				std::cout << "Enter the size of your most prescise note\n(I.E: 1/8th note will be entered as 8, 1/4 note will be entered as 4)\n"
+				std::cout << "Enter the size of your most precise note\n(I.E: 1/8th note will be entered as 8, 1/4 note will be entered as 4)\n"
 					<< "Make your entry a power of 2. (E.G 2, 4, 8, 16, etc..)"
 					<< std::endl;
 				getline(std::cin, InputText);
