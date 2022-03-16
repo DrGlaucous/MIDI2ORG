@@ -49,8 +49,11 @@ ___
 #### Recommended Supplementary Tools
 
 [ORGCopy](https://github.com/DrGlaucous/ORGCopy) - the companion tool to MIDI2ORG, invaluable in its ability to turn multiple orgs containing 1 channel to a single ORG containing multiple channels.
+
 [Musescore](https://musescore.org/) - good for determining the shortest notes of the song in terms of standard music notes
+
 [MidiEditor](https://www.midieditor.org/) - good for determining the relationship of the channels to the tracks and finding any drum channels
+
 [ORGMaker2](https://www.cavestory.org/download/music-tools.php) - the program used to actually **view and edit** .org files [-and it's also open-source, too](https://github.com/shbow/organya)
 
 ___
@@ -71,6 +74,9 @@ The final executable can be found in the "bin" directory
 ___
 ### Credits:
 Organya Music Format: Daisuke "Pixel" Amaya
+
 "File.cpp" (mostly borrowed from CSE2, a reverse-engineering of the cave story engine): Clownacy and whoever else...
+
 [MIDI-Parser](https://github.com/MStefan99/Midi-Parser) library: MStefan99
+
 Everything left over: Dr_Glaucous
