@@ -1,6 +1,0 @@
-C:/Users/Edward Stuckey/Desktop/CaveStory RomHack/ORGTools/MIDI2ORGSource/MIDI2ORG/build/CMakeFiles/rebuild_cache.dir
-C:/Users/Edward Stuckey/Desktop/CaveStory RomHack/ORGTools/MIDI2ORGSource/MIDI2ORG/build/CMakeFiles/edit_cache.dir
-C:/Users/Edward Stuckey/Desktop/CaveStory RomHack/ORGTools/MIDI2ORGSource/MIDI2ORG/build/CMakeFiles/MIDI2ORG.dir
-C:/Users/Edward Stuckey/Desktop/CaveStory RomHack/ORGTools/MIDI2ORGSource/MIDI2ORG/build/lib/MIDIParse/CMakeFiles/rebuild_cache.dir
-C:/Users/Edward Stuckey/Desktop/CaveStory RomHack/ORGTools/MIDI2ORGSource/MIDI2ORG/build/lib/MIDIParse/CMakeFiles/edit_cache.dir
-C:/Users/Edward Stuckey/Desktop/CaveStory RomHack/ORGTools/MIDI2ORGSource/MIDI2ORG/build/lib/MIDIParse/CMakeFiles/libParser.dir
