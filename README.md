@@ -74,6 +74,19 @@ Generate executable:
 The final executable can be found in the "bin" directory
 
 ___
+### Changelog:
+#### Version 1.0.2
+* fixed several potential crashes when entering large force-simplification values
+* fixed the issue where fast songs could receive a "0" tempo (this crashes ORGMaker)
+* updated the method of handling notes (too high or low) out of ORG range
+* parser can now handle dirtier MIDIs (specifically if there are "note.off" events for notes that were never "on" in the first place)
+* fixed out-of-order events causing the parser to put a note in the next track when it didn't need to
+#### Version 1.0.1
+* support for all 3 binary MIDI types
+* drum track handling
+* auto and manual length simplification
+
+___
 ### Credits:
 Organya Music Format: Daisuke "Pixel" Amaya
 

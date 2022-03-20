@@ -23,7 +23,7 @@ namespace fs = std::filesystem;
 #include "File.h"
 #include "Midi.h"
 
-#define PRGMVERSION "1.0.1"
+#define PRGMVERSION "1.0.2"
 #define READ_LE16(p) ((p[1] << 8) | p[0]); p += 2
 #define READ_LE32(p) ((p[3] << 24) | (p[2] << 16) | (p[1] << 8) | p[0]); p += 4
 
@@ -105,10 +105,30 @@ int ValueMap(float val1Min, float val1Max, float val2Min, float val2Max, float i
 	return (int)floor(MapBuffer + 0.5);//round to nearest integer
 
 }
-//sorts by ascending note X value
-bool SortFunction(ORGNOTEDATA one, ORGNOTEDATA two)
+//sorts by ascending note X value (TS is TimeStart)
+bool SortFunctionTS(ORGNOTEDATA one, ORGNOTEDATA two)
 {
 	return (one.TimeStart < two.TimeStart);//in correct position if the earlier positioned one is less than the later positioned one
+
+}
+//sorts by start/stop values
+bool SortFunctionEvT(NOTEDATA one, NOTEDATA two)
+{
+
+	if (one.TimeStart < two.TimeStart)
+	{
+		return true;
+	}
+	else if (one.TimeStart == two.TimeStart &&//puts all stop commands before the start commands
+		one.Status < two.Status
+		)
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
 
 }
 
@@ -282,7 +302,7 @@ bool ConvertMidi(MIDICONV inOptions)
 	unsigned int Tempo = 120;//default MIDI tempo is 120 BMP, or 500000 microseconds per 1/4 note, will be shared between tracks
 	bool TempoSet = false;//if we encounter multiple tempo metadata in a piece of music, this will make sure only the first tempo event sets the tempo for the whole conversion
 
-	gResolution = header.getDivision();
+	gResolution = header.getDivision();//this may have 1 of 2 alternate resolution formats: time in 1/4 note, or something based on framerate (I have not accounted for the second format, and it may produce adverse results)
 
 	std::cout << "Resolution: " << gResolution << std::endl;
 
@@ -430,11 +450,17 @@ bool ConvertMidi(MIDICONV inOptions)
 		{
 
 			if (inOptions.SimplestNote > gResolution)
+			{
 				std::cout << "WARNING: Most Prescise Note is less than entered value: No reduction will happen." << std::endl;
+			}
+			else
+			{
+				//int reducFactor  = inOptions.SimplestNote / 4;
+				reductionRate = gResolution / (inOptions.SimplestNote / 4);//if we still did this operation, a large enough number would yield a 0, which is *very* bad: we devide by it multiple times
+			}
 
-			//int reducFactor  = inOptions.SimplestNote / 4;
 
-			reductionRate = gResolution / (inOptions.SimplestNote / 4);
+
 
 			//gResolution;//length of 1/4 note
 			//gResolution/2 == length of 1/8 note
@@ -539,26 +565,48 @@ bool ConvertMidi(MIDICONV inOptions)
 			{
 				continue;
 			}
+			else if (TrackData[i].size() > 1)
+			{
+				std::sort(TrackData[i].begin(), TrackData[i].end(), SortFunctionEvT);//organize the out-of-order 0 length events (puts all OFF events before ON events)
+			}
+
 
 			std::vector<ORGNOTEDATA> TrackDataOrg[MAXTRACK];//One vector per each ORG track (used to bump notes to the next track if the current note is still active)
 			ORGNOTEDATA BufferNote;
 
 
-
-
+			//std::sort by relative time and note status (for the entire TrackData[i])
+			//with midi vehicle.mid, track 1, channel 0, note 45 and note 46 are flopped (use this for reference)
 
 			//converts start/stop values into note X + length (and sorts multiple simultaneous notes into different tracks)
 			for (int z = 0; z < TrackData[i].size(); ++z)//for every MIDI note event
 			{
-			
 
-				BufferNote.Pitch = (TrackData[i].begin() + z)->Pitch - 12;//middle C in MIDI is 60, in ORG it is 48, a difference of 12
+				//middle C in MIDI is 60, in ORG it is 48, a difference of 12
+				//ORG range goes from 0 to 95, while the MIDI range is up to 127
+				if ((TrackData[i].begin() + z)->Pitch < 12)//bump deep notes up by 1 octave
+				{
+					BufferNote.Pitch = (TrackData[i].begin() + z)->Pitch;
+				}
+				else if ((TrackData[i].begin() + z)->Pitch > 107)//bring high notes down by however much needed: 95 is the upper ORG limit, plus the 12 we knock it down by = 107
+				{	
+					//knock it down by 12 + 12*the number of higher octaves it is 
+					BufferNote.Pitch = (TrackData[i].begin() + z)->Pitch - 
+						((((TrackData[i].begin() + z)->Pitch - 96) / 12) * 12 + 12);//the /12 * 12 seems redundant, but it groups the number by 12s (because ints can't be decimals, so they only take the value of the 1st digit, no rounding)
+
+
+
+				}
+				else
+				{
+					BufferNote.Pitch = (TrackData[i].begin() + z)->Pitch - 12;//middle C in MIDI is 60, in ORG it is 48, a difference of 12 (one octave down)
+				}
 				BufferNote.TimeStart = (TrackData[i].begin() + z)->TimeStart;//no conversions needed here
 				BufferNote.Volume = (char)ValueMap(0, 127, 4, 252, (TrackData[i].begin() + z)->Volume);//map volume from MIDI format to ORG format
 				BufferNote.Length = 1;//in case the MIDI never tells this note to stop, it will still have a termination point
 				BufferNote.LengthSet = false;//tells us if we need to move on to the next track or not (true == good to add another note behind it)
 				BufferNote.EventType = (TrackData[i].begin() + z)->Status;//start/stop
-	
+
 				//iterate through the ORG tracks to ask the questions below
 				for (int j = 0; j < MAXTRACK; ++j)
 				{
@@ -568,16 +616,22 @@ bool ConvertMidi(MIDICONV inOptions)
 
 					if (TrackDataOrg[j].size() == 0)//automatically insert the buffer since there is nothing before it
 					{
-						TrackDataOrg[j].push_back(BufferNote);
+						if (BufferNote.EventType == true)//I've run across some MIDIs that have NOTE OFF events that are NOT tied to any NOTE ON events. That was very poor of the MIDI, but we still need to be able to handle it.
+						{
+							TrackDataOrg[j].push_back(BufferNote);//only append it if it is a note.start command
+							break;//get out of this for loop: we gave the data a home.
+						}
 						break;//get out of this for loop: we gave the data a home.
+						//do we need continue; if the note is a note.stop command? if the conditions here are satisfied, I don't think any of the higher tracks can be populated
+
 					}
 
 
 
 					//we need to put this one above the condition seen above (because if we are playing 2 of the same notes, we want them to be separate)
 					//we also need to check if the input is a start function before doing this \/
-					if ((TrackDataOrg[j].end() - 1)->LengthSet == true &&
-						BufferNote.EventType == true &&
+					if ((TrackDataOrg[j].end() - 1)->LengthSet == true &&//other note is done
+						BufferNote.EventType == true &&//this one is a note.start command
 						((TrackDataOrg[j].end() - 1)->Length + (TrackDataOrg[j].end() - 1)->TimeStart) <= BufferNote.TimeStart//a condition that can occur when notes are snapped from length 0 to length 1 (see the function below)
 						)//check to see if the previous note has stopped playing
 					{
@@ -598,7 +652,7 @@ bool ConvertMidi(MIDICONV inOptions)
 						(TrackDataOrg[j].end() - 1)->LengthSet = true;//note is complete
 
 						//break-up function
-						if((TrackDataOrg[j].end() - 1)->Length > 255)//ORG notes can only be 1 char long, so any longer than that will need to be cut up into multiple notes
+						if ((TrackDataOrg[j].end() - 1)->Length > 255)//ORG notes can only be 1 char long, so any longer than that will need to be cut up into multiple notes
 						{
 
 							BufferNote = *(TrackDataOrg[j].end() - 1);//copy the last note to the buffer
@@ -628,15 +682,20 @@ bool ConvertMidi(MIDICONV inOptions)
 							(TrackDataOrg[j].end() - 1)->Length = 1;//mimimum value
 						}
 
+						//that off-chance the MIDI is being bad and sends 2 note.start commands our way, we cap the last note and begin the new one
+						if (BufferNote.EventType == true)
+						{
+							TrackDataOrg[j].push_back(BufferNote);
+						}
 
 						break;//data applied successfully
 
 					}
 
 				}
-	
+
 				//if we get here and were not able to find a space, the note is (unfortunately) discarded
-	
+
 			//I have a habit of taking notes right inside the code. Here is a list of questions asked by the logic above:
 			// check: is previous note the same?
 			// if no, check if the previous note's deltaTime is set
@@ -646,8 +705,11 @@ bool ConvertMidi(MIDICONV inOptions)
 			// to slap it on, take deltaTime between the notes and set the previous note's deltaTime variable
 			// 
 			//process: send note data
-	
+
 			}
+
+
+
 
 
 			//handle drum track parsing
@@ -701,7 +763,7 @@ bool ConvertMidi(MIDICONV inOptions)
 					if (TrackDrumOrg[u].size() == 0)
 						continue;
 
-					std::sort(TrackDrumOrg[u].begin(), TrackDrumOrg[u].end(), SortFunction);//sort by X value
+					std::sort(TrackDrumOrg[u].begin(), TrackDrumOrg[u].end(), SortFunctionTS);//sort by X value
 
 				}
 
@@ -740,13 +802,29 @@ bool ConvertMidi(MIDICONV inOptions)
 			//setup header data
 
 			//BeatsPM can be found at the top of the file (it is set by a MIDI time signature event)
-			char NotesPB = gResolution / reductionRate;
+
+			//gResolution is the length of a 1/4 note
+			//NotesPB used to ba a char, but MIDI resolution can be much larger than this. this causes some undefined behavior if we cast it down to a char
+			int NotesPB = (gResolution / reductionRate);//this will never become 0 (the reduction rate is never larger than the resolution)
+			unsigned char ReducedNotesPB{};//we will devide the value above until it is less than 1 char, so we can append it to the ORG (and maybe have a multiple of the original notes per beat?)
+
+			//there is no need to correctly adjust the tempo to match the new ReducedNotesPB because tempo is based on per-note, not per-measure, so any measure size will work in it
+			//ORGCopy will have trouble with combining tracks with such large notes per beat values, but these can be reduced in the ORG settings with OrgMaker2 (or manually with a HEX editor)
+			//I feel like I am beating a dead horse though. If your values are big enough to require this logic, you should probably simplify the song
+			//
+
+			//deal with a NotesPB that could be larger than 255
+			if (NotesPB > 255)
+				ReducedNotesPB = 255;//0xFF is our limit
+			else
+				ReducedNotesPB = NotesPB;//we can just use it as-is
+
 
 			fwrite("Org-02", 6, 1, outFile);
 			//fwrite(&gResolution, 2, 1, outFile);
-			File_WriteLE16((60000 / (Tempo * NotesPB)), outFile);//tempo
-			File_WriteLE8(BeatsPM, outFile);
-			File_WriteLE8(NotesPB, outFile);
+			File_WriteLE16((60000 / (Tempo * NotesPB)) ? (60000 / (Tempo * NotesPB)) : 1, outFile);//tempo: if the tempo is 0, we just use 1 (because that is as fast as the ORG player can go)
+			File_WriteLE8(BeatsPM, outFile);//beats per measure
+			File_WriteLE8(ReducedNotesPB, outFile);//notes per beat, max of 255		
 			File_WriteLE32(0, outFile);//start of repeat loop
 			File_WriteLE32((TrackData[i].end() - 1)->TimeStart, outFile);//end of repeat loop uses the last MIDI event to tell the ORG file where the repeat sign is
 			for (int j = 0; j < MAXTRACK; ++j)//write note info
@@ -979,6 +1057,7 @@ int main(void)
 
 			confirm = 0;//reset confirm
 			ConvertMidi(options);
+			std::cout << "Done." << std::endl;
 
 		}
 
