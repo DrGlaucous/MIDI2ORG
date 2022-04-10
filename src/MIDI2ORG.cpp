@@ -642,11 +642,14 @@ bool ConvertMidi(MIDICONV inOptions)
 
 
 					//the only issue I see here is if we get two note.start commands for the same note without any note.stops in between (this is not likely to happen, but I think this assumption may come back to bite me)
+					//it DID come back to bite me: I found several midis that fed the program duplicate note.start events and royally screwed it over
 					//no need to check if the type is a startNote because all conditions where that would be true are caught in the statement above
 					if ((TrackDataOrg[j].end() - 1)->Pitch == BufferNote.Pitch)//are this and last note the same
 					{
 
-
+						//check for duplicate note.on events (same pitch and TimeStart notes will be discarded) (NON-duplicate Time.Start notes will be handled further down below.)
+						if ((TrackDataOrg[j].end() - 1)->TimeStart == BufferNote.TimeStart)
+							break;
 
 						(TrackDataOrg[j].end() - 1)->Length = (BufferNote.TimeStart) - ((TrackDataOrg[j].end() - 1)->TimeStart);//delta time
 						(TrackDataOrg[j].end() - 1)->LengthSet = true;//note is complete
@@ -721,7 +724,7 @@ bool ConvertMidi(MIDICONV inOptions)
 				std::vector<ORGNOTEDATA> TrackDrumOrg[MAXTRACK];//we will be copying the processed data 
 
 				bool PushedBack = false;//use this to ratchet DrumTrackNumber x1 if things were pushed back on that note[u]
-				int DrumTrackNumber = 8;//increment this each time we find a populated note
+				int DrumTrackNumber = 0;//increment this each time we find a populated note (currently can handle 16 different precussion insturments, but this may need changed in order to handle more)
 				//iterate through all values in a char (max possible values in an ORG's pitch scale)
 				for (int u = 0; u < 256; ++u)
 				{
@@ -758,7 +761,7 @@ bool ConvertMidi(MIDICONV inOptions)
 
 				//At this point, TrackDrumOrg is organized by pitch: all notes with the same pitch are in the same slot
 				//we need to sort them by start time (we don't need to worry about total length because they are all the same note)
-				for (int u = 8; u < MAXTRACK; ++u)
+				for (int u = 0; u < MAXTRACK; ++u)
 				{
 					if (TrackDrumOrg[u].size() == 0)
 						continue;
