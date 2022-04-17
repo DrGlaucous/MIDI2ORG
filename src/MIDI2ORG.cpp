@@ -515,6 +515,19 @@ bool ConvertMidi(MIDICONV inOptions)
 		//compression here
 		for (int i = 0; i < MAXCHANNEL; ++i)//for each vector in the array
 		{
+
+			if (TrackData[i].size() == 0)//skips the track if there are no note events in there
+			{
+				continue;
+			}
+			else if (TrackData[i].size() > 1)
+			{
+				//i moved this here becasue the sorting was originally applied after the notes had been compressed (creating many more 0-length start-stop pairs than there should be).
+				//this resulted in some incorrect start-stop re-ordering and inverted note playing
+				std::sort(TrackData[i].begin(), TrackData[i].end(), SortFunctionEvT);//organize the out-of-order 0 length events (puts all OFF events before ON events)
+			}
+
+
 			for (int j = 0; j < TrackData[i].size(); ++j)//for each event recorded in the track
 			{
 
@@ -565,10 +578,7 @@ bool ConvertMidi(MIDICONV inOptions)
 			{
 				continue;
 			}
-			else if (TrackData[i].size() > 1)
-			{
-				std::sort(TrackData[i].begin(), TrackData[i].end(), SortFunctionEvT);//organize the out-of-order 0 length events (puts all OFF events before ON events)
-			}
+
 
 
 			std::vector<ORGNOTEDATA> TrackDataOrg[MAXTRACK];//One vector per each ORG track (used to bump notes to the next track if the current note is still active)
@@ -647,8 +657,10 @@ bool ConvertMidi(MIDICONV inOptions)
 					if ((TrackDataOrg[j].end() - 1)->Pitch == BufferNote.Pitch)//are this and last note the same
 					{
 
-						//check for duplicate note.on events (same pitch and TimeStart notes will be discarded) (NON-duplicate Time.Start notes will be handled further down below.)
-						if ((TrackDataOrg[j].end() - 1)->TimeStart == BufferNote.TimeStart)
+						//check for duplicate note.on events (same pitch and Time.Start notes will be discarded) (NON-duplicate Time.Start notes will be handled further down below.)						
+						if ((TrackDataOrg[j].end() - 1)->TimeStart == BufferNote.TimeStart &&
+							BufferNote.EventType == true//also make sure that the note is indeed note.ON in type
+							)
 							break;
 
 						(TrackDataOrg[j].end() - 1)->Length = (BufferNote.TimeStart) - ((TrackDataOrg[j].end() - 1)->TimeStart);//delta time
